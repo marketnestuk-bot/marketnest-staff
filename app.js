@@ -32,7 +32,28 @@ async function refresh(){
   if(staff.active!==true){panel.append(make('h2','Access suspended'));return;}
   panel.append(make('h2','Staff Dashboard'),make('p','Account status: Active'),make('h3','Your permissions'));
   for(const [key,title] of roles){if(staff.permissions?.[key]===true)panel.append(make('p','✓ '+title));}
-  panel.append(make('p','Moderation tools coming next.'));
+  if(staff.permissions?.moderate_listings===true)await advertQueue(panel);
+}
+async function advertQueue(panel){
+  const section=make('section');panel.append(section);
+  section.append(make('h3','Pending adverts'));
+  const {data,error}=await client.from('product_listings').select('id,title,description,price_pence').eq('status','pending').order('created_at',{ascending:true}).limit(100);
+  if(error){section.append(make('p',error.message));return;}
+  if(!data.length)section.append(make('p','No pending adverts.'));
+  for(const item of data){
+    const card=make('div');card.className='card';
+    card.append(make('strong',item.title),make('p',item.description),make('p','£'+(item.price_pence/100).toFixed(2)));
+    for(const status of ['approved','rejected']){
+      card.append(action(status==='approved'?'Approve':'Reject',async()=>{
+        if(!confirm('Confirm '+status+' for '+item.title+'?'))return;
+        const {data:changed,error}=await client.from('product_listings').update({status}).eq('id',item.id).eq('status','pending').select('id');
+        if(error)throw error;
+        if(changed.length!==1)throw Error('No change made. Check permissions or refresh.');
+        await refresh();message('Advert '+status+'.');
+      }));
+    }
+    section.append(card);
+  }
 }
 function render(d){for(const id of ['staff','invitations','audit'])$(id).replaceChildren();for(const s of d.staff||[]){const card=make('div');card.className='card';card.append(make('strong',s.email),make('p',s.suspended?'Suspended':'Active'));const c=checks(s.permissions||{});card.append(c,action('Save permissions',async()=>{await rpc('owner_update_staff',{p_user_id:s.user_id,p_permissions:values(c),p_suspended:s.suspended});message('Permissions saved');await refresh()}),action(s.suspended?'Reactivate':'Suspend',async()=>{if(!confirm('Change access for '+s.email+'?'))return;await rpc('owner_update_staff',{p_user_id:s.user_id,p_permissions:s.permissions,p_suspended:!s.suspended});await refresh()}));$('staff').append(card);}for(const i of d.invitations||[]){const card=make('div');card.className='card';card.append(make('strong',i.email),make('p',i.status));if(i.status==='pending')card.append(action('Revoke invitation',async()=>{await rpc('owner_revoke_staff_invitation',{p_invitation_id:i.id});await refresh()}));$('invitations').append(card);}for(const a of d.audit||[]){const card=make('div');card.className='card';const details=a.details||{};const actor=(d.staff||[]).find(s=>s.user_id===a.actor_id);const title=({product_listing_moderated:'Advert moderation',seller_application_reviewed:'Seller application review'})[a.action]||a.action;card.append(make('strong',title),make('p','Staff: '+(actor?.email||a.actor_id||'System')),make('p',new Date(a.created_at).toLocaleString('en-GB')));if(details.record_id)card.append(make('p','Record: '+details.record_id));if(details.new_status)card.append(make('p','Decision: '+(details.previous_status||'Unknown')+' → '+details.new_status));$('audit').append(card);}}
 $('defaults').append(checks(Object.fromEntries(defaults.map(x=>[x,true]))));
