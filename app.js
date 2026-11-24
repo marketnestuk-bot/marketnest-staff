@@ -13,7 +13,27 @@ function values(d){const result={};d.querySelectorAll('input:checked').forEach(x
 function action(title,fn){const b=make('button',title);b.type='button';b.onclick=async()=>{b.disabled=true;try{await fn()}catch(e){message(e.message)}finally{b.disabled=false}};return b;}
 async function rpc(name,args={}){const {data,error}=await client.rpc(name,args);if(error)throw error;return data;}
 function start(){const key=localStorage.getItem('marketnest_publishable_key');$('setup').hidden=!!key;if(!key)return;if(!/^sb_publishable_/.test(key)){localStorage.removeItem('marketnest_publishable_key');start();return;}client=createClient(URL,key);client.auth.onAuthStateChange((event)=>{if(event==='PASSWORD_RECOVERY'){recovering=true;$('login').hidden=true;$('portal').hidden=true;recoveryPanel.hidden=false;message('Choose a new password.');}});refresh().catch(e=>message(e.message));}
-async function refresh(){const {data}=await client.auth.getUser();if(recovering){$('login').hidden=true;$('portal').hidden=true;return;}const user=data?.user;$('login').hidden=!!user;$('portal').hidden=!user;if(!user)return;$('identity').textContent='Signed in as '+user.email;const data2=await rpc('owner_staff_overview');$('owner').hidden=data2===null;$('employee').hidden=data2!==null;if(data2)render(data2);}
+async function refresh(){
+  const {data}=await client.auth.getUser();
+  $('owner').hidden=true;
+  $('employee').hidden=true;
+  const old=$('staff-dashboard');if(old)old.remove();
+  if(recovering){$('login').hidden=true;$('portal').hidden=true;return;}
+  const user=data?.user;
+  $('login').hidden=!!user;$('portal').hidden=!user;
+  if(!user)return;
+  $('identity').textContent='Signed in as '+user.email;
+  const owner=await rpc('owner_staff_overview');
+  if(owner!==null){$('owner').hidden=false;render(owner);return;}
+  const staff=await rpc('my_staff_status');
+  if(staff===null){$('employee').hidden=false;return;}
+  const panel=make('section');panel.id='staff-dashboard';panel.className='panel';
+  $('employee').after(panel);
+  if(staff.active!==true){panel.append(make('h2','Access suspended'));return;}
+  panel.append(make('h2','Staff Dashboard'),make('p','Account status: Active'),make('h3','Your permissions'));
+  for(const [key,title] of roles){if(staff.permissions?.[key]===true)panel.append(make('p','✓ '+title));}
+  panel.append(make('p','Moderation tools coming next.'));
+}
 function render(d){for(const id of ['staff','invitations','audit'])$(id).replaceChildren();for(const s of d.staff||[]){const card=make('div');card.className='card';card.append(make('strong',s.email),make('p',s.suspended?'Suspended':'Active'));const c=checks(s.permissions||{});card.append(c,action('Save permissions',async()=>{await rpc('owner_update_staff',{p_user_id:s.user_id,p_permissions:values(c),p_suspended:s.suspended});message('Permissions saved');await refresh()}),action(s.suspended?'Reactivate':'Suspend',async()=>{if(!confirm('Change access for '+s.email+'?'))return;await rpc('owner_update_staff',{p_user_id:s.user_id,p_permissions:s.permissions,p_suspended:!s.suspended});await refresh()}));$('staff').append(card);}for(const i of d.invitations||[]){const card=make('div');card.className='card';card.append(make('strong',i.email),make('p',i.status));if(i.status==='pending')card.append(action('Revoke invitation',async()=>{await rpc('owner_revoke_staff_invitation',{p_invitation_id:i.id});await refresh()}));$('invitations').append(card);}for(const a of d.audit||[]){const card=make('div');card.className='card';card.append(make('strong',a.action),make('p',new Date(a.created_at).toLocaleString()));$('audit').append(card);}}
 $('defaults').append(checks(Object.fromEntries(defaults.map(x=>[x,true]))));
 $('savekey').onclick=()=>{const k=$('pubkey').value.trim();if(!/^sb_publishable_[a-zA-Z0-9_-]+$/.test(k)){message('Enter a valid publishable key, not a secret key.');return;}localStorage.setItem('marketnest_publishable_key',k);start();};
