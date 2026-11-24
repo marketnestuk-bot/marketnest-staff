@@ -33,6 +33,7 @@ async function refresh(){
   panel.append(make('h2','Staff Dashboard'),make('p','Account status: Active'),make('h3','Your permissions'));
   for(const [key,title] of roles){if(staff.permissions?.[key]===true)panel.append(make('p','✓ '+title));}
   if(staff.permissions?.moderate_listings===true)await advertQueue(panel);
+  if(staff.permissions?.review_sellers===true)await sellerQueue(panel);
 }
 async function advertQueue(panel){
   const section=make('section');panel.append(section);
@@ -50,6 +51,27 @@ async function advertQueue(panel){
         if(error)throw error;
         if(changed.length!==1)throw Error('No change made. Check permissions or refresh.');
         await refresh();message('Advert '+status+'.');
+      }));
+    }
+    section.append(card);
+  }
+}
+async function sellerQueue(panel){
+  const section=make('section');panel.append(section);
+  section.append(make('h3','Pending seller applications'));
+  const {data,error}=await client.from('seller_applications').select('id,shop_name,seller_type,description').eq('status','pending').order('created_at',{ascending:true}).limit(100);
+  if(error){section.append(make('p',error.message));return;}
+  if(!data.length)section.append(make('p','No pending seller applications.'));
+  for(const item of data){
+    const card=make('div');card.className='card';
+    card.append(make('strong',item.shop_name),make('p',item.seller_type),make('p',item.description));
+    for(const status of ['approved','rejected']){
+      card.append(action(status==='approved'?'Approve seller':'Reject seller',async()=>{
+        if(!confirm('Confirm '+status+' for '+item.shop_name+'?'))return;
+        const {data:changed,error}=await client.from('seller_applications').update({status}).eq('id',item.id).eq('status','pending').select('id');
+        if(error)throw error;
+        if(changed.length!==1)throw Error('No change made. Check permissions or refresh.');
+        await refresh();message('Seller application '+status+'.');
       }));
     }
     section.append(card);
